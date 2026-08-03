@@ -351,3 +351,91 @@ The `<html>` tag in `index.html` defaults to `data-theme="hulesa"`, and `useThem
 - CI runs on GitHub Actions (`.github/workflows/ci.yml`): a `check` job (lint, typecheck, unit tests, production build) and an `integration` job that brings up the RustFS Docker stack and runs `pnpm run test:integration`.
 - Releases are built by `.github/workflows/release.yml`: pushing a `v*` tag (or dispatching the workflow manually with an existing tag) builds all three desktop platforms in a matrix (macos-latest → `dist:mac`, windows-latest → `dist:win`, ubuntu-latest → `dist:linux`) and attaches the binaries to the matching GitHub release via `softprops/action-gh-release`. The `dist:*` scripts pass `--publish never` because electron-builder otherwise attempts implicit publishing on CI and fails without a `GH_TOKEN` — asset upload is the workflow's job. Artifacts are unsigned (`CSC_IDENTITY_AUTO_DISCOVERY=false` — no signing identities on CI), so the release notes must keep the macOS Gatekeeper / Windows SmartScreen caveats. The action appends assets and fails on duplicate names — delete existing assets for a tag before re-dispatching.
 - The landing page is `docs/index.html`, served by GitHub Pages from `docs/` on `main` at `/<user>.github.io/hulesa/` (Pages project paths are case-sensitive — `/hulesa/` 404s) — all asset paths are relative so the project path works. It is plain HTML + a compiled stylesheet (`docs/assets/landing.css`, built from `docs/src/landing.css` via `pnpm run docs:css` — rerun after touching either, and commit the output); no other build step or CDN dependencies (Inter is self-hosted in `docs/fonts/`). The DaisyUI theme blocks and glass classes mirror `src/renderer/src/index.css` — keep the two files in sync when changing design tokens. The GitHub repo URL appears exactly once, as the `GITHUB_REPO` constant in the bottom inline script of `docs/index.html`; the Pages origin (`https://gr3gg0r.github.io/hulesa/`) is hardcoded in the canonical link, og/twitter URLs, the JSON-LD block, and `docs/sitemap.xml` — all need the same edit if the handle changes. An animated walkthrough of the Simple journey lives in `docs/index.html` (the `[data-demo]` section: class-toggled timeline in the bottom inline script, `.demo-*` styles in `docs/src/landing.css`, static final frame under `prefers-reduced-motion`). `docs/assets/journey-demo.gif` is a 14.4s palette-optimized capture of one loop, embedded in the README — regenerate by recording the `[data-demo]` element for one cycle (Playwright `recordVideo`, light scheme), cropping to its bounding box, then two-pass `palettegen`/`paletteuse` to GIF (mp4 embeds do NOT render as players in GitHub READMEs — only GIFs animate there). The `#download` section detects the visitor's OS (user-agent, with a mobile guard and best-effort Intel-Mac detection via `userAgentData`) and points the primary button at the matching asset from `api.github.com/repos/<repo>/releases/latest` at runtime — no per-release edits needed; on API failure the button falls back to the Releases page. The "Under the hood" badge carries the unit-test count (`Vitest · N tests`) by hand — bump it when the suite grows.
+
+
+---
+
+## Centralised homelab infrastructure
+
+> ## Networking: Tailscale first
+>
+> **Every homelab service is reached over Tailscale, not the LAN.** Ports bind to
+> the tailnet address (`100.76.45.102`), never `0.0.0.0` — they are invisible on
+> `192.168.100.0/24` and on the internet. `ufw` cannot filter published Docker
+> ports, so the bind address *is* the access control.
+>
+> Before anything else: `tailscale status` must list `homelab`.
+>
+> - **Do not** use `192.168.100.129` — that path is deliberately closed
+> - **Do not** publish container ports to `0.0.0.0`
+> - To share a hot-reloading dev server, bind `0.0.0.0` locally and hand out the
+>   **MacBook's** tailnet address (`100.67.52.1`), not its LAN IP
+>
+> Authoritative reference: the **`homelab` repo** —
+> [`docs/inventory.md`](../homelab/docs/inventory.md) for what runs where,
+> [`docs/ports.md`](../homelab/docs/ports.md) before claiming any port,
+> [`docs/shared-tech.md`](../homelab/docs/shared-tech.md) for tooling that
+> already exists.
+
+
+> Added 2026-08-03. The homelab was reinstalled on Pop!_OS; the old
+> `192.168.100.129:52xx` dev services and the self-hosted Infisical are **gone**.
+> Anything in this file referring to them is stale.
+
+### Do not run your own Postgres, Redis, S3, or Mailpit
+
+One shared instance of each runs on the homelab. This project has its own
+database and namespace inside them — you do not need a local container.
+
+| Service | Address | This project uses |
+|---|---|---|
+| Postgres 16 | `100.76.45.102:13000` | database `hulesa_dev`, user `devuser` |
+| Redis 7 | `100.76.45.102:13001` | logical DB **6** |
+| RustFS (S3) | `http://100.76.45.102:13002` | bucket `hulesa-dev` |
+| Mailpit | `100.76.45.102:13005` (SMTP) | shared inbox, UI on `:13006` |
+
+**Reachable over Tailscale only.** These ports are bound to the tailnet address,
+not `0.0.0.0` — they are invisible on the LAN and the internet. Your machine must
+be on the tailnet (`tailscale status` should list `homelab`).
+
+Passwords live in the homelab repo, SOPS-encrypted:
+
+```bash
+sops --decrypt --input-type dotenv --output-type dotenv \
+  ../homelab/stacks/dev-shared/dev.enc.env
+```
+
+### What belongs in Docker, and what does not
+
+**Only infrastructure.** Applications run natively so hot reload works — putting
+a dev server in a container turns every keystroke into a rebuild.
+
+To preview a hot-reloading app on a phone or another device, bind to all
+interfaces and use the **MacBook's** tailnet address (`100.67.52.1`):
+
+```bash
+pnpm exec vite --host 0.0.0.0     # NOT `pnpm dev -- --host` — the -- is passed literally
+```
+
+### Secrets: SOPS + age, not Infisical
+
+Infisical ran on the homelab and was lost in the reinstall. It is not coming
+back — it was a server, on a LUKS-encrypted laptop that cannot boot unattended,
+which is the worst possible property for a secrets store.
+
+Encrypted values now live in the repo and are committed. Only the values are
+encrypted; key names stay readable so diffs show what changed.
+Reference: `mkp/deploy/SOPS_SETUP.md`.
+
+### Deploying this project
+
+Deployed apps do **not** use the shared dev services. Each gets its own isolated
+stack — own network, own Postgres and Redis, own Cloudflare Tunnel, no published
+host ports. Reference implementation:
+`mkp/services/mkp-v2-api/deploy/homelab/`.
+
+### More
+
+- `homelab/docs/shared-tech.md` — tooling that already exists across these repos
+- `homelab/docs/inventory.md` — what runs on the host and who owns it
+- `homelab/docs/ports.md` — check before publishing any port
