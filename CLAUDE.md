@@ -439,3 +439,27 @@ host ports. Reference implementation:
 - `homelab/docs/shared-tech.md` — tooling that already exists across these repos
 - `homelab/docs/inventory.md` — what runs on the host and who owns it
 - `homelab/docs/ports.md` — check before publishing any port
+
+## Continuous integration
+
+> Audited 2026-08-04 across every repo. **This one: — passing.**
+>
+> **Public repo.** GitHub-hosted minutes are free and unlimited here, and a self-hosted runner must NEVER be attached — a fork's PR would execute arbitrary code on the homelab.
+
+**Before touching a workflow here, read the standard:**
+[`homelab/docs/ci.md`](../homelab/docs/ci.md).
+
+The three rules that matter most:
+
+1. **A red workflow nobody fixes is worse than none.** For each one, ask
+   whether anyone acted the last time it failed. If not, delete it — that is a
+   legitimate outcome, not a retreat.
+2. **Local hooks already cover lint, typecheck, unit tests, and build.** CI
+   should not duplicate them. It should do what hooks cannot: cross-repo
+   contracts, deploys, scheduled audits, anything needing org secrets.
+3. **macOS runners bill at 10x.** iOS jobs on every push are how a 2,000-minute
+   allowance disappears. Move them to tags or `workflow_dispatch`.
+
+Self-hosted runners on the homelab are **not** currently recommended — the
+minute allowance is not binding, because CI fails in ~12 seconds rather than
+because it is efficient. `homelab/docs/ci.md` covers when that changes.
