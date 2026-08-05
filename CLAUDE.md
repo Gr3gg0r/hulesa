@@ -417,6 +417,41 @@ interfaces and use the **MacBook's** tailnet address (`100.67.52.1`):
 pnpm exec vite --host 0.0.0.0     # NOT `pnpm dev -- --host` — the -- is passed literally
 ```
 
+### Running heavy work on the homelab instead of the MacBook
+
+The **entire** `~/Workspace/GitHub` folder is mirrored to the homelab at
+`~/work/GitHub` by one Mutagen session named `github`, so this repo is already
+there. Edits arrive in ~8s. Nothing to set up per repo.
+
+```bash
+mutagen sync list github     # must say: Watching for changes
+```
+
+Offload anything long or memory-hungry — test suites, builds, dependency
+installs, Playwright. The homelab has **31 GB of RAM and 4 threads**; the MacBook
+has 16 GB and is usually already swapping. That is the whole reason this exists.
+
+| Mode | How | Use it for |
+|---|---|---|
+| **Run there, stay here** | `ssh homelab 'cd ~/work/GitHub/hulesa && <cmd>'` | one heavy command; ask Claude Code for it "on the homelab" |
+| **Agent runs there** | `ssh homelab -t 'tmux new -A -s work'`, then `claude` | closing the laptop mid-run — `Ctrl-b d` detaches, the job continues |
+| **Steer from phone/browser** | `claude remote-control` inside that tmux | driving the session from claude.ai/code or the Claude app |
+| **Unattended overnight** | `kimi -p "<task>"` | no approval prompts at all |
+
+Reattach from anywhere on the tailnet: `ssh homelab -t 'tmux attach -t work'`
+
+#### Four things that will bite you
+
+| | |
+|---|---|
+| **`.git` is not synced** | Run git on the MacBook only. `git status` on the homelab does not reflect reality, and `claude remote-control --spawn worktree` cannot work there |
+| **Never run an agent in this repo on both machines at once** | Mutagen is bidirectional; concurrent edits produce `*.conflict` files and one side's work is lost |
+| **Dependencies are per-machine** | `node_modules`, `vendor`, `.venv`, `Pods` are excluded — arm64-darwin binaries do not run on x64-linux. Install once on each side |
+| **iOS, Xcode, and simulators stay on the MacBook** | There is no Xcode on Linux and no way around it |
+
+Full detail, including what else is excluded from the sync:
+[`../homelab/docs/offload-workflows.md`](../homelab/docs/offload-workflows.md).
+
 ### Secrets: SOPS + age, not Infisical
 
 Infisical ran on the homelab and was lost in the reinstall. It is not coming
