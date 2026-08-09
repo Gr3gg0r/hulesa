@@ -452,6 +452,63 @@ Reattach from anywhere on the tailnet: `ssh homelab -t 'tmux attach -t work'`
 Full detail, including what else is excluded from the sync:
 [`../homelab/docs/offload-workflows.md`](../homelab/docs/offload-workflows.md).
 
+### Report back to the homelab — this is a shared box
+
+Several projects and several agents use the homelab at once. It has one Postgres,
+one Redis, one RustFS, 4 threads, and a single ephemeral port table. **Anything
+this project leaves running affects everyone else.**
+
+The `homelab` repo is the controller. Keep this project's entry current:
+
+```
+../homelab/state/hulesa.md      ← this project's file; write only this one
+../homelab/state/_shared-tier.md     ← who has claimed what, current issues
+../homelab/state/README.md           ← the protocol
+```
+
+One file per project, because concurrent agents appending to a shared file
+conflict every time. Copy `../homelab/state/_template.md` to start.
+
+**Update it in the same session** that claims a shared resource, leaves something
+running, or discovers a cross-project problem — not for ordinary feature work.
+
+⚠️ **`.git` is not synced and the homelab has no `.git` for the homelab repo.**
+Write the file from either machine; commit it on the MacBook.
+
+#### Before you claim anything
+
+```bash
+bash ../homelab/scripts/homelab-police.sh    # run on the homelab; read-only
+```
+
+It reports ephemeral port pressure, dev servers older than 4h, `0.0.0.0` binds,
+unregistered ports, containers with no memory limit, and shared-tier
+reachability. **If it flags this project, fix it or record why not.**
+
+#### Two rules that protect the other projects
+
+**Kill what you start.** A dev server that outlives its session holds a port and
+sometimes leaks connections. Run long things under tmux so they stay visible:
+
+```bash
+ssh homelab -t 'tmux new -A -s hulesa'
+```
+
+**Pool your connections.** One client created at startup, shared — never a new
+connection per operation. Each close lingers 60s in `TIME-WAIT`.
+
+```bash
+ss -tan | grep -c :13001    # should stay in single digits, not climb
+```
+
+> **Why this exists.** On 2026-08-09 two projects' dev servers opened a Redis
+> connection per operation and filled **99.9% of the machine's ephemeral port
+> table** — 28,196 sockets in TIME-WAIT against 28,232 ports. Every outbound
+> connection on the box was competing for ~36 ports. It surfaced as *Moonlight
+> breaking*, because Sunshine could no longer bind its RTSP port. Nothing about
+> the symptom pointed at the cause. On a shared box, "my project is fine" is not
+> the same as "the box is fine".
+
 ### Secrets: SOPS + age, not Infisical
 
 Infisical ran on the homelab and was lost in the reinstall. It is not coming
